@@ -3,11 +3,10 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
--- URL Webhook Vercel
 local WEBHOOK_URL = "https://dbdataentry.vercel.app/api/receiver/game"
-local INTERVAL = 30 -- Mengirim pembaruan status setiap 30 detik
+local INTERVAL = 30
+local ACCOUNT_TOKEN = "default-tenant" -- Ubah token ini jika menggunakan grup akun berbeda
 
--- Deteksi fungsi HTTP executor
 local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
 
 if not httpRequest then
@@ -15,7 +14,6 @@ if not httpRequest then
     return
 end
 
--- Simpan waktu pertama kali skrip di-execute
 local SESSION_START = os.date("!%Y-%m-%dT%H:%M:%SZ")
 
 local function sendPayload(eventType)
@@ -30,7 +28,7 @@ local function sendPayload(eventType)
     end
 
     local payloadData = {
-        event = eventType, -- "Aktif" atau "Offline"
+        event = eventType,
         userId = LocalPlayer.UserId,
         username = LocalPlayer.Name,
         displayName = LocalPlayer.DisplayName,
@@ -39,23 +37,24 @@ local function sendPayload(eventType)
         jobId = game.JobId ~= "" and game.JobId or "Local/Private",
         avatarUrl = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. LocalPlayer.UserId .. "&width=420&height=420&format=png",
         timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-        sessionStart = SESSION_START -- Mengirim waktu start yang konsisten
+        sessionStart = SESSION_START
     }
 
     pcall(function()
         httpRequest({
             Url = WEBHOOK_URL,
             Method = "POST",
-            Headers = { ["Content-Type"] = "application/json" },
+            Headers = {
+                ["Content-Type"] = "application/json",
+                ["x-account-token"] = ACCOUNT_TOKEN
+            },
             Body = HttpService:JSONEncode(payloadData)
         })
     end)
 end
 
--- 1. Kirim status Aktif pertama kali saat di-execute
 sendPayload("Aktif")
 
--- 2. Kirim update status secara berkala (Heartbeat)
 task.spawn(function()
     while true do
         task.wait(INTERVAL)
@@ -63,7 +62,6 @@ task.spawn(function()
     end
 end)
 
--- 3. Kirim status Offline saat game ditutup atau leave
 game:BindToClose(function()
     sendPayload("Offline")
 end)
