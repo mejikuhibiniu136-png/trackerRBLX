@@ -5,7 +5,6 @@ local LocalPlayer = Players.LocalPlayer
 
 local WEBHOOK_URL = "https://dbdataentry.vercel.app/api/receiver/game"
 local INTERVAL = 30
-local ACCOUNT_TOKEN = "default-tenant" -- Ubah token ini jika menggunakan grup akun berbeda
 
 local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
 
@@ -44,10 +43,7 @@ local function sendPayload(eventType)
         httpRequest({
             Url = WEBHOOK_URL,
             Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json",
-                ["x-account-token"] = ACCOUNT_TOKEN
-            },
+            Headers = { ["Content-Type"] = "application/json" },
             Body = HttpService:JSONEncode(payloadData)
         })
     end)
