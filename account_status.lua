@@ -1,15 +1,6 @@
 --[[
   dbdataentry - klien status akun Roblox (v3)
   Backend: POST /api/receiver/account  (header x-api-key)
-
-  Kolom yang dikirim, sama dengan skema database:
-    username, displayName, state, gameName, userId, placeId, jobId,
-    event, latencyMs, sessionStart   (+ avatarUrl, timestamp)
-  `lastUpdate` TIDAK dikirim: server mengisinya sendiri dari jamnya (kebal jam klien yang miring).
-
-  PENTING: API key di script yang berjalan di executor selalu bisa dibaca siapa pun yang
-  memegang script ini. Gunakan key khusus script ini (RECEIVER_API_KEY), jangan dipakai di
-  tempat lain, dan ganti bila script pernah dibagikan.
 ]]
 
 local Players = game:GetService("Players")
@@ -27,13 +18,16 @@ while not LocalPlayer do
 end
 
 -- ===== KONFIGURASI =====
+local sharedEnv = (getgenv and getgenv()) or _G
+local USER_CONFIG = type(sharedEnv.DBDATAENTRY) == "table" and sharedEnv.DBDATAENTRY or {}
+
 local CONFIG = {
-	URL = "https://dbdataentry.vercel.app/api/receiver/account",
-	API_KEY = "ISI_API_KEY_BARU_DI_SINI",
-	INTERVAL = 20, -- detik. Server: STALLED > 30 dtk, OFFLINE > 45 dtk. Jangan lebih dari 25.
-	MAX_ATTEMPTS = 4, -- percobaan per pengiriman Aktif
-	OFFLINE_ATTEMPTS = 2, -- Offline dikirim saat game menutup, waktunya sempit
-	BASE_DELAY = 1.5, -- jeda retry awal (detik), dikali 2 tiap gagal
+	URL = USER_CONFIG.URL or "https://dbdataentry.vercel.app/api/receiver/account",
+	API_KEY = USER_CONFIG.API_KEY,
+	INTERVAL = USER_CONFIG.INTERVAL or 20,
+	MAX_ATTEMPTS = 4,
+	OFFLINE_ATTEMPTS = 2,
+	BASE_DELAY = 1.5,
 	MAX_DELAY = 12,
 }
 -- =======================
@@ -44,20 +38,18 @@ if not httpRequest then
 	return
 end
 
-if CONFIG.API_KEY == "ISI_API_KEY_BARU_DI_SINI" then
-	warn("[dbdataentry] Isi CONFIG.API_KEY dulu.")
+if type(CONFIG.API_KEY) ~= "string" or #CONFIG.API_KEY < 16 then
+	warn('[dbdataentry] API key belum diset. Jalankan: getgenv().DBDATAENTRY = { API_KEY = "..." } sebelum loadstring.')
 	return
 end
 
--- Cegah dua instance berjalan bersamaan (auto-execute + manual): yang lama dihentikan.
-local sharedEnv = (getgenv and getgenv()) or _G
 if type(sharedEnv.__dbdataentry_stop) == "function" then
 	pcall(sharedEnv.__dbdataentry_stop)
 end
 
 local stopped = false
 local offlineSent = false
-local lastLatencyMs = nil -- RTT pengiriman sukses terakhir, dilaporkan di payload berikutnya
+local lastLatencyMs = nil
 local warnedStatus = {}
 local cachedGameName = nil
 
@@ -87,11 +79,11 @@ local function warnOnce(status, body)
 	end
 	warnedStatus[status] = true
 	if status == 401 then
-		warn("[dbdataentry] API key ditolak (401). Cocokkan CONFIG.API_KEY dengan RECEIVER_API_KEY di Vercel.")
+		warn("[dbdataentry] API key ditolak (401). Cocokkan API_KEY dengan RECEIVER_API_KEY di Vercel.")
 	elseif status == 400 then
 		warn("[dbdataentry] Payload ditolak (400): " .. tostring(body))
 	elseif status == 429 then
-		warn("[dbdataentry] Terkena rate limit (429). Naikkan CONFIG.INTERVAL.")
+		warn("[dbdataentry] Terkena rate limit (429). Naikkan INTERVAL.")
 	elseif status == 503 then
 		warn("[dbdataentry] Server belum dikonfigurasi (503). RECEIVER_API_KEY belum diset di Vercel.")
 	else
@@ -113,7 +105,7 @@ local function buildPayload(eventType)
 		placeId = game.PlaceId,
 		jobId = game.JobId ~= "" and game.JobId or "Local/Private",
 		event = eventType,
-		latencyMs = lastLatencyMs, -- nil di pengiriman pertama: field dilewati
+		latencyMs = lastLatencyMs,
 		sessionStart = SESSION_START,
 		timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
 		avatarUrl = "https://www.roblox.com/headshot-thumbnail/image?userId="
@@ -126,7 +118,6 @@ local function buildPayload(eventType)
 	return ok and encoded or nil
 end
 
--- Kirim satu payload dengan retry (backoff eksponensial + jitter). Mengembalikan true jika sukses.
 local function send(eventType, maxAttempts)
 	local body = buildPayload(eventType)
 	if not body then
@@ -136,7 +127,6 @@ local function send(eventType, maxAttempts)
 
 	local delay = CONFIG.BASE_DELAY
 	for attempt = 1, maxAttempts do
-		-- Jika Offline sudah dikirim, retry Aktif yang tertinggal tidak boleh menimpanya.
 		if eventType ~= "Offline" and (offlineSent or stopped) then
 			return false
 		end
@@ -163,7 +153,7 @@ local function send(eventType, maxAttempts)
 		if status then
 			warnOnce(status, type(res) == "table" and res.Body or nil)
 			if not shouldRetry(status) then
-				return false -- 400/401/403/404: mengulang tidak akan membantu
+				return false
 			end
 		end
 
@@ -193,7 +183,6 @@ send("Aktif", CONFIG.MAX_ATTEMPTS)
 
 task.spawn(function()
 	while not offlineSent and not stopped do
-		-- jitter kecil agar banyak akun tidak mengirim serentak
 		task.wait(CONFIG.INTERVAL + math.random() * 2)
 		if not offlineSent and not stopped then
 			send("Aktif", CONFIG.MAX_ATTEMPTS)
